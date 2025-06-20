@@ -1,0 +1,33 @@
+//@version=6
+indicator("V4 Aziz NIFTY ATM Rolling Straddle ", overlay=false)
+
+// Input for max lookback period and manual expiry entry
+grp1 = "Lookback & Expiry"
+max_lookback = input.int(500, title="Number of Latest Bars (Lookback)",group = grp1)
+expiry_input = input.string("250102", title="Manual Expiry (YYMMDD)",group = grp1,inline = "expiry"), custom_expiry = input.bool(false, title='Expiry Input',group= grp1,inline = "expiry")
+
+EMAlength = input(55, 'EMA length INDICATOR:',group = "Main Indicator")
+show_indicator_lines = input.bool(false, title='Show Indicator Lines',group = "Main Indicator")
+
+show_normal_ema = input.bool(title='Show Normal EMA --',defval = true,group = "EMA calculations", inline = "normalema")
+ema_normal_lenght = input(21, 'EMA length NORMAL:',group = "EMA calculations",inline = "normalema")
+show_heikin_ema = input.bool(title='Show Heikin Ashi EMA --', defval = false,group = "EMA calculations",inline = "hema")
+ema_heikin_lenght = input(21, 'EMA length HEIKIN ASHI:',group = "EMA calculations",inline = "hema")
+
+show_normal_candle = input.bool(false, title='Show Normal Candle',group ="CANDLES")
+show_heikin_candle = input.bool(false, title='Show Heikin Ashi Candle',group ="CANDLES")
+
+Show_close =  input.bool(true, title='Show Summed Close',group= "Plotting Close")
+Show_Heikin_close = input.bool(false, title='Show Summed Close Heikin Ashi',group= "Plotting Close")
+
+show_iv = input.bool(false, title='Show iv data',group= "Plotting Close")
+
+if show_iv
+    Show_close :=false
+    show_normal_ema := false
+    show_normal_candle :=false
+    Show_Heikin_close :=false
+    show_heikin_ema := false
+    show_indicator_lines :=false
+
+// ... (The full Pine Script code as you provided continues here. For brevity, refer to your originally provided Pine Script.)

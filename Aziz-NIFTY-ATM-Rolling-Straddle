@@ -30,4 +30,202 @@ if show_iv
     show_heikin_ema := false
     show_indicator_lines :=false
 
-// ... (The full Pine Script code as you provided continues here. For brevity, refer to your originally provided Pine Script.)
+
+// Function to calculate next Thursday
+f_get_next_expiry(current_date) =>
+    day_of_week = dayofweek(current_date)
+    days_to_thursday = day_of_week <= dayofweek.thursday ? dayofweek.thursday - day_of_week : 7 - (day_of_week - dayofweek.thursday)
+    next_thursday = current_date + days_to_thursday * 24 * 60 * 60 * 1000
+    next_thursday
+
+// Function to adjust for holidays
+f_adjust_for_holiday(next_expiry, holidays) =>
+    array.includes(holidays, next_expiry) ? next_expiry - 24 * 60 * 60 * 1000 : next_expiry
+
+// List of holidays for 2025 (converted to timestamps in milliseconds)
+holidays = array.new_int(0)
+array.push(holidays, timestamp(2025, 4, 10, 0, 0))  // 10th April 2025
+array.push(holidays, timestamp(2025, 5, 1, 0, 0))   // 1st May 2025
+array.push(holidays, timestamp(2025, 10, 2, 0, 0))  // 2nd October 2025
+array.push(holidays, timestamp(2025, 12, 25, 0, 0)) // 25th December 2025
+
+// Calculate dynamic expiry using `timenow`
+current_time = timenow  // Use real-world time
+next_expiry = f_get_next_expiry(current_time)
+adjusted_expiry = f_adjust_for_holiday(next_expiry, holidays)
+expiry_input := custom_expiry ? expiry_input : str.tostring(year(adjusted_expiry) % 100) + str.tostring(month(adjusted_expiry), "00") + str.tostring(dayofmonth(adjusted_expiry), "00")
+
+
+// Function to construct instrument names
+get_instrument_name(expiry_input, strike, type) => "NIFTY" + expiry_input + type + str.tostring(strike)
+
+// Function to fetch consolidated OHLC data for an instrument
+get_option_ohlc_dynamic(instrument, is_active) => str.split(is_active ? request.security(instrument, timeframe.period , str.format("{0};{1};{2};{3}", open, high, low, close), barmerge.gaps_off, barmerge.lookahead_on) : na, ";")
+
+// Restrict calculations to the last `max_lookback` bars
+is_in_lookback = bar_index >= (last_bar_index - max_lookback + 1)
+
+// Initialize synthetic OHLC variables
+var float synth_open = na, var float synth_high = na, var float synth_low = na,var float synth_close = na
+
+var float call_close = na
+var float put_close = na
+
+var float call_price = na
+var float put_price = na
+
+strike = math.round(close / 50) * 50
+// Calculate synthetic OHLC for the `max_lookback` range
+if is_in_lookback
+    atm_strike = math.round(close / 50) * 50
+    call_instrument = get_instrument_name(expiry_input, atm_strike, "C")
+    put_instrument = get_instrument_name(expiry_input, atm_strike, "P")
+    call_ohlc = get_option_ohlc_dynamic(call_instrument, is_in_lookback)
+    put_ohlc = get_option_ohlc_dynamic(put_instrument, is_in_lookback)
+    call_open = str.tonumber(array.get(call_ohlc, 0)), call_high = str.tonumber(array.get(call_ohlc, 1)), call_low = str.tonumber(array.get(call_ohlc, 2)), call_close := str.tonumber(array.get(call_ohlc, 3))
+    put_open = str.tonumber(array.get(put_ohlc, 0)), put_high = str.tonumber(array.get(put_ohlc, 1)), put_low = str.tonumber(array.get(put_ohlc, 2)), put_close := str.tonumber(array.get(put_ohlc, 3))
+    synth_open := na(call_open) or na(put_open) ? na : (call_open + put_open)
+    synth_high := na(call_high) or na(put_high) ? na : (call_high + put_high)
+    synth_low := na(call_low) or na(put_low) ? na : (call_low + put_low)
+    synth_close := na(call_close) or na(put_close) ? na : (call_close + put_close)
+    call_price := call_close
+    put_price := put_close
+    
+
+// Plot synthetic candles for all processed bars
+plotcandle(open=synth_open, high=synth_high, low=synth_low, close=synth_close, color=synth_close > synth_open ? color.green : color.red, title="Normal Candles", display = show_normal_candle?display.all:display.none)
+
+// Initialize synthetic Heiken Ashi variables
+var float ha_open = na,var float ha_high = na,var float ha_low = na,var float ha_close = na
+
+// Calculate synthetic Heiken Ashi candles
+if is_in_lookback
+    ha_close := (synth_open + synth_high + synth_low + synth_close) / 4
+    ha_open := na(ha_open[1]) ? (synth_open + synth_close) / 2 : (ha_open[1] + ha_close[1]) / 2
+    ha_high := math.max(synth_high, ha_open, ha_close)
+    ha_low := math.min(synth_low, ha_open, ha_close)
+
+// Plot synthetic Heiken Ashi candles
+plotcandle(open=ha_open, high=ha_high, low=ha_low, close=ha_close, color=ha_close > ha_open ? color.green : color.red,wickcolor = ha_close > ha_open ? color.green : color.red, title="Heiken Ashi Candles",display = show_heikin_candle ? display.all : display.none)
+
+plot(synth_close,title = "Normal Close",display = Show_close ? display.all : display.none)
+plot(ha_close,title = "Heikin Close",display = Show_Heikin_close ? display.all : display.none)
+
+ema_normla = ta.ema(synth_close,ema_normal_lenght)
+ema_heikin = ta.ema(ha_close,ema_heikin_lenght)
+
+
+plot(ema_normla,color=color.red,title = "Normal EMA",display= show_normal_ema ? display.all : display.none)
+plot(ema_heikin,color=color.orange,title = "Heikin EMA",display= show_heikin_ema ? display.all : display.none)
+
+
+// =================== RISK-FREE RATE ===================
+risk_free_rate_price = request.security("IN10Y", "D", close)
+risk_free_rate = na(risk_free_rate_price) ? 0.05 : risk_free_rate_price / 100  // Default to 5% if IN10Y data unavailable
+//===================================================================================================
+// Define expiry time (3:15 PM) in milliseconds
+expiry_hour = 15
+expiry_minute = 15
+
+// Adjust the expiry timestamp to include the specific expiry time
+adjusted_expiry_with_time = timestamp(year(adjusted_expiry), month(adjusted_expiry), dayofmonth(adjusted_expiry), expiry_hour, expiry_minute)
+
+// Calculate time remaining to expiry in milliseconds
+time_remaining_ms = adjusted_expiry_with_time - timenow
+
+// Prevent negative time to expiry (in case the expiry time has passed)
+time_remaining_ms := time_remaining_ms < 0 ? 0 : time_remaining_ms
+
+// Convert to hours and years
+hours_to_expiry = time_remaining_ms / (60 * 60 * 1000)
+T = hours_to_expiry / (365 * 24)  // Convert hours to a fraction of a year
+
+
+// =================== IV CALCULATION ===================
+// Cumulative normal distribution approximation
+cum_norm(x) =>
+    t = 1 / (1 + 0.2316419 * math.abs(x))
+    d = 0.3989423 * math.exp(-x * x / 2)
+    prob = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+    x >= 0 ? 1 - prob : prob
+
+// Black-Scholes pricing function
+black_scholes_price(S, K, r, T, sigma, is_call) =>
+    T_adj = math.max(T, 0.0001)  // Prevent division by zero
+    d1 = (math.log(S / K) + (r + sigma * sigma / 2) * T_adj) / (sigma * math.sqrt(T_adj))
+    d2 = d1 - sigma * math.sqrt(T_adj)
+    is_call ? S * cum_norm(d1) - K * math.exp(-r * T_adj) * cum_norm(d2) : K * math.exp(-r * T_adj) * cum_norm(-d2) - S * cum_norm(-d1)
+
+// Iterative IV solver (Bisection Method)
+calculate_iv(target_price, S, K, r, T, is_call) =>
+    max_iterations = 100
+    tolerance = 0.0001
+    loww = 0.0
+    highh = 2.0  // Initial guess range for IV (200%)
+    var float mid = na
+    for i = 0 to max_iterations
+        mid := (loww + highh) / 2
+        price = black_scholes_price(S, K, r, T, mid, is_call)
+        if math.abs(price - target_price) < tolerance
+            break
+        if price > target_price
+            highh := mid
+        else
+            loww := mid
+    mid
+
+
+// Calculate IV for ATM Call and Put options
+call_iv = not na(call_price) ? calculate_iv(call_price, close, strike, risk_free_rate, T, true) : na
+put_iv = not na(put_price) ? calculate_iv(put_price, close, strike, risk_free_rate, T, false) : na
+call_imp_vol = call_iv * 100
+put_imp_vol = put_iv * 100
+
+// =================== PLOTTING ===================
+plot(call_iv, title="Call IV", color=color.green, linewidth=2,  display = display.none )
+plot(put_iv, title="Put IV", color=color.red, linewidth=2,  display = display.none )
+plot(risk_free_rate * 100, title="Risk-Free Rate (%)", color=color.orange, linewidth=2,  display = display.none )
+
+
+
+// Average IV for the straddle
+indiavix = request.security("INDIAVIX","D", close)
+iv = (call_iv + put_iv) / 2
+imp_vol = iv * 100
+// =================== IV TREND ANALYSIS ===================
+iv_ema = ta.ema(iv, 21)
+iv_stddev = ta.stdev(iv, 21)
+iv_z_score = ((iv - iv_ema) / iv_stddev)
+
+plot(iv,color=color.red , display = show_iv? display.all: display.none)
+plot(iv_ema,color=color.yellow , display = show_iv? display.all: display.none)
+
+spike_up = iv[1] >= iv_ema[1] and iv[2] < iv_ema[2]
+spike_donw = iv[1]<= iv_ema[1] and iv[2] > iv_ema[2]
+// =================== STRADDLE PRICE TREND ===================
+straddle_ema = ta.ema(synth_close, 21)
+ema = straddle_ema
+
+// =================== SIGNAL GENERATION ===================
+iv_spike_threshold = input.float(1.5, title="IV Spike Z-Score Threshold")
+
+
+// =================== TABLE CREATION ===================
+var table iv_data_table = table.new(position.top_center , 5, 2, border_width=1, frame_color=color.new(color.gray, 80), frame_width=1)
+
+// Table Headers
+table.cell(iv_data_table, 0, 0, "IV Stdev", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+table.cell(iv_data_table, 0, 1, str.tostring(iv_stddev, "#.####"), bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+
+// Add Data to Table
+table.cell(iv_data_table, 1, 0, "Average IV", bgcolor=color.new(color.blue, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+table.cell(iv_data_table, 1, 1, str.tostring(imp_vol, "#.##") + "%", bgcolor=color.new(color.blue, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+
+table.cell(iv_data_table, 2, 0, "India VIX", bgcolor=color.new(color.green, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+table.cell(iv_data_table, 2, 1, str.tostring(indiavix, "#.##"), bgcolor=color.new(color.green, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+
+table.cell(iv_data_table, 3, 0, "Call IV", bgcolor=color.new(color.orange, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+table.cell(iv_data_table, 3, 1, str.tostring(call_imp_vol, "#.##") + "%", bgcolor=color.new(color.orange, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+
+table.cell(iv_data_table, 4, 0, "Put IV", bgcolor=color.new(color.red, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+table.cell(iv_data_table, 4, 1, str.tostring(put_imp_vol, "#.##") + "%", bgcolor=color.new(color.red, 90), text_color=color.white, text_size=size.small, text_halign=text.align_center)
